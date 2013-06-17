@@ -1,0 +1,959 @@
+
+/*
+
+ JS Signals <http://millermedeiros.github.com/js-signals/>
+ Released under the MIT license
+ Author: Miller Medeiros
+ Version: 1.0.0 - Build: 268 (2012/11/29 05:48 PM)
+*/
+(function(i){function h(a,b,c,d,e){this._listener=b;this._isOnce=c;this.context=d;this._signal=a;this._priority=e||0}function g(a,b){if(typeof a!=="function")throw Error("listener is a required param of {fn}() and should be a Function.".replace("{fn}",b));}function e(){this._bindings=[];this._prevParams=null;var a=this;this.dispatch=function(){e.prototype.dispatch.apply(a,arguments)}}h.prototype={active:!0,params:null,execute:function(a){var b;this.active&&this._listener&&(a=this.params?this.params.concat(a):
+a,b=this._listener.apply(this.context,a),this._isOnce&&this.detach());return b},detach:function(){return this.isBound()?this._signal.remove(this._listener,this.context):null},isBound:function(){return!!this._signal&&!!this._listener},isOnce:function(){return this._isOnce},getListener:function(){return this._listener},getSignal:function(){return this._signal},_destroy:function(){delete this._signal;delete this._listener;delete this.context},toString:function(){return"[SignalBinding isOnce:"+this._isOnce+
+", isBound:"+this.isBound()+", active:"+this.active+"]"}};e.prototype={VERSION:"1.0.0",memorize:!1,_shouldPropagate:!0,active:!0,_registerListener:function(a,b,c,d){var e=this._indexOfListener(a,c);if(e!==-1){if(a=this._bindings[e],a.isOnce()!==b)throw Error("You cannot add"+(b?"":"Once")+"() then add"+(!b?"":"Once")+"() the same listener without removing the relationship first.");}else a=new h(this,a,b,c,d),this._addBinding(a);this.memorize&&this._prevParams&&a.execute(this._prevParams);return a},
+_addBinding:function(a){var b=this._bindings.length;do--b;while(this._bindings[b]&&a._priority<=this._bindings[b]._priority);this._bindings.splice(b+1,0,a)},_indexOfListener:function(a,b){for(var c=this._bindings.length,d;c--;)if(d=this._bindings[c],d._listener===a&&d.context===b)return c;return-1},has:function(a,b){return this._indexOfListener(a,b)!==-1},add:function(a,b,c){g(a,"add");return this._registerListener(a,!1,b,c)},addOnce:function(a,b,c){g(a,"addOnce");return this._registerListener(a,
+!0,b,c)},remove:function(a,b){g(a,"remove");var c=this._indexOfListener(a,b);c!==-1&&(this._bindings[c]._destroy(),this._bindings.splice(c,1));return a},removeAll:function(){for(var a=this._bindings.length;a--;)this._bindings[a]._destroy();this._bindings.length=0},getNumListeners:function(){return this._bindings.length},halt:function(){this._shouldPropagate=!1},dispatch:function(a){if(this.active){var b=Array.prototype.slice.call(arguments),c=this._bindings.length,d;if(this.memorize)this._prevParams=
+b;if(c){d=this._bindings.slice();this._shouldPropagate=!0;do c--;while(d[c]&&this._shouldPropagate&&d[c].execute(b)!==!1)}}},forget:function(){this._prevParams=null},dispose:function(){this.removeAll();delete this._bindings;delete this._prevParams},toString:function(){return"[Signal active:"+this.active+" numListeners:"+this.getNumListeners()+"]"}};var f=e;f.Signal=e;typeof define==="function"&&define.amd?define('signals',[],function(){return f}):typeof module!=="undefined"&&module.exports?module.exports=f:i.signals=
+f})(this);
+(function() {
+    var lastTime = 0;
+    var vendors = ['ms', 'moz', 'webkit', 'o'];
+    for(var x = 0; x < vendors.length && !window.requestAnimationFrame; ++x) {
+        window.requestAnimationFrame = window[vendors[x]+'RequestAnimationFrame'];
+        window.cancelAnimationFrame =
+          window[vendors[x]+'CancelAnimationFrame'] || window[vendors[x]+'CancelRequestAnimationFrame'];
+    }
+
+    if (!window.requestAnimationFrame)
+        window.requestAnimationFrame = function(callback, element) {
+            var currTime = new Date().getTime();
+            var timeToCall = Math.max(0, 16 - (currTime - lastTime));
+            var id = window.setTimeout(function() { callback(currTime + timeToCall); },
+              timeToCall);
+            lastTime = currTime + timeToCall;
+            return id;
+        };
+
+    if (!window.cancelAnimationFrame)
+        window.cancelAnimationFrame = function(id) {
+            clearTimeout(id);
+        };
+}());
+define('dk/util/scroller',['require','exports','module','signals'],function (require, exports, module) {
+
+    var signals = require('signals');
+
+    var _wheelSpeed = 0.1;
+    var _value = 0;
+    var _target = null;
+    var _child = null;
+    var _scrollHeight = 0;
+    var _contentSize = 0;
+    var _ticking = false;
+    var _minLimit = 0;
+    var _maxLimit = 0;
+    var _deltaValue = 0;
+    //var _offset = 0;
+
+
+    var DKScroller = function(target) {
+        this.onUpdate = new signals.Signal();
+        _target = target;
+        _child = _target.firstChild;
+
+        _contentSize = _child.offsetHeight;
+        _minLimit = _target.offsetHeight - _contentSize;
+
+        this.value = 0;
+        this.easingValue = 0;
+        this.speed= 0;
+        this.prevPosition = 0;
+
+        _target.onmousewheel = this.onMouseWheel.bind(this);
+    };
+
+    DKScroller.prototype.updateHeight = function(height) {
+      _contentSize = height;
+    };
+
+    DKScroller.prototype.setWheelSpeed = function(value) {
+      _wheelSpeed = value;
+    };
+
+    DKScroller.prototype.onMouseWheel = function(event) {
+      event.preventDefault();
+      //console.log(event);
+      this.speed = event.wheelDeltaY * _wheelSpeed;
+      if(Math.abs(this.speed) < 1) this.speed = 0;
+
+      this.requestTick();
+    };
+
+    DKScroller.prototype.requestTick = function() {
+        //console.log(this.update);
+        if (!_ticking) {
+            requestAnimationFrame(this.update.bind(this));
+            _ticking = true;
+        }
+    };
+
+    DKScroller.prototype.update = function() {
+      _minLimit = _target.offsetHeight - _contentSize;
+      _value = this.easingValue;
+
+      this.speed *= 0.9;
+      this.easingValue += this.speed;
+      if (this.easingValue <= _minLimit) this.easingValue = _minLimit;
+      if (this.easingValue >= _maxLimit) this.easingValue = _maxLimit;
+      if(Math.abs(this.speed) < 1) this.speed = 0;
+      _ticking=false;
+      if (this.onUpdate) this.onUpdate.dispatch(_value);
+    };
+
+    module.exports =  DKScroller;
+});
+define('dk/util/resizer',['require','exports','module','signals'],function (require, exports, module) {
+
+  var signals = require('signals');
+
+  var _ticking = false;
+  var _tickDelay = 250;
+  var windowWidth = 0;
+  var windowHeight = 0;
+  var timeoutId = null;
+
+  var self;
+
+  var DKResizer = function() {
+    this.onUpdate = new signals.Signal();
+    self = this;
+  };
+
+  DKResizer.prototype.init = function() {
+    windowWith = window.innerWidth;
+    windowHeight = window.innerHeight;
+    window.addEventListener('resize', this.resize.bind(this), false);
+  };
+
+  DKResizer.prototype.resize = function(event) {
+    windowWidth = window.innerWidth;
+    windowHeight = window.innerHeight;
+    if ( timeoutId ) {
+      clearTimeout( timeoutId );
+    }
+    timeoutId = setTimeout( this.update, _tickDelay );
+  };
+
+  DKResizer.prototype.update = function() {
+    console.log('udpate',this.onUpdate);
+    if (self.onUpdate) self.onUpdate.dispatch(windowWidth,windowHeight);
+  };
+
+  module.exports = DKResizer;
+
+});
+define('dk/net/request',['require','exports','module'],function (require, exports, module) {
+
+    var DKRequest = function(url) {
+        //EventListener.call(this);
+        this.name = "DKRequest";
+        this.method = 'GET';
+        this.request = new XMLHttpRequest();
+        this.url = url;
+        this.responseType = 'json';
+        this.responseData = null;
+        this.onComplete = null;
+    };
+
+    //DKRequest.prototype = Object.create(EventListener.prototype);
+
+    DKRequest.prototype.send = function() {
+        if (!this.url) {
+            throw new Error("DKRequest requires a url property to be not null.");
+        }
+        this.request.open(this.method, this.url, true);
+        this.request.send();
+        this.request.onload = this.onRequestLoaded.bind(this);
+        this.request.onreadystatechange = this.onStateChange.bind(this);
+    };
+
+    DKRequest.prototype.onRequestLoaded = function(progressEvent) {
+
+    };
+
+    DKRequest.prototype.onStateChange = function() {
+        if (this.request.readyState==4) {
+            if (this.responseType=='json') {
+                this.responseData = JSON.parse(this.request.responseText);
+            }
+            if (this.onComplete) this.onComplete(this.responseData);
+        }
+    };
+
+    module.exports = DKRequest;
+});
+
+define('search/gridmodel',['require','exports','module','dk/net/request'],function (require, exports, module) {
+
+  var DKRequest = require('dk/net/request');
+
+  var _instance = null;
+  var _data = null;
+
+  var GridModel = function() {
+    this.sharedVar = "test";
+    this.onDataComplete = null;
+  };
+
+  GridModel.sharedInstance = function() {
+    if (_instance === null) {
+      _instance = new GridModel();
+    }
+    return _instance;
+  };
+
+
+  GridModel.prototype.getData = function() {
+    var request = new DKRequest('/data/new_users2.json?v=2');
+    request.onComplete = this.requestComplete.bind(this);
+    request.send();
+  };
+
+  GridModel.prototype.requestComplete = function(data) {
+    console.log('requestComplete');
+    _data = data.result;
+    if (this.onDataComplete) this.onDataComplete(_data);
+  };
+
+  return GridModel;
+
+});
+define('hogan',['require','exports','module'],function(require, exports, module){
+
+// wrapped Hogan.js into an AMD module and also added pragmas to remove
+// compiler after build if it isn't needed. Source code wasn't touched
+// besides that.
+
+
+// START WRAPPED CODE
+// ===========================================================================
+
+
+/*
+ *  Copyright 2011 Twitter, Inc.
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *  http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
+
+
+var Hogan = {};
+
+(function (Hogan, useArrayBuffer) {
+  Hogan.Template = function (renderFunc, text, compiler, options) {
+    this.r = renderFunc || this.r;
+    this.c = compiler;
+    this.options = options;
+    this.text = text || '';
+    this.buf = (useArrayBuffer) ? [] : '';
+  }
+
+  Hogan.Template.prototype = {
+    // render: replaced by generated code.
+    r: function (context, partials, indent) { return ''; },
+
+    // variable escaping
+    v: hoganEscape,
+
+    // triple stache
+    t: coerceToString,
+
+    render: function render(context, partials, indent) {
+      return this.ri([context], partials || {}, indent);
+    },
+
+    // render internal -- a hook for overrides that catches partials too
+    ri: function (context, partials, indent) {
+      return this.r(context, partials, indent);
+    },
+
+    // tries to find a partial in the curent scope and render it
+    rp: function(name, context, partials, indent) {
+      var partial = partials[name];
+
+      if (!partial) {
+        return '';
+      }
+
+      if (this.c && typeof partial == 'string') {
+        partial = this.c.compile(partial, this.options);
+      }
+
+      return partial.ri(context, partials, indent);
+    },
+
+    // render a section
+    rs: function(context, partials, section) {
+      var tail = context[context.length - 1];
+
+      if (!isArray(tail)) {
+        section(context, partials, this);
+        return;
+      }
+
+      for (var i = 0; i < tail.length; i++) {
+        context.push(tail[i]);
+        section(context, partials, this);
+        context.pop();
+      }
+    },
+
+    // maybe start a section
+    s: function(val, ctx, partials, inverted, start, end, tags) {
+      var pass;
+
+      if (isArray(val) && val.length === 0) {
+        return false;
+      }
+
+      if (typeof val == 'function') {
+        val = this.ls(val, ctx, partials, inverted, start, end, tags);
+      }
+
+      pass = (val === '') || !!val;
+
+      if (!inverted && pass && ctx) {
+        ctx.push((typeof val == 'object') ? val : ctx[ctx.length - 1]);
+      }
+
+      return pass;
+    },
+
+    // find values with dotted names
+    d: function(key, ctx, partials, returnFound) {
+      var names = key.split('.'),
+          val = this.f(names[0], ctx, partials, returnFound),
+          cx = null;
+
+      if (key === '.' && isArray(ctx[ctx.length - 2])) {
+        return ctx[ctx.length - 1];
+      }
+
+      for (var i = 1; i < names.length; i++) {
+        if (val && typeof val == 'object' && names[i] in val) {
+          cx = val;
+          val = val[names[i]];
+        } else {
+          val = '';
+        }
+      }
+
+      if (returnFound && !val) {
+        return false;
+      }
+
+      if (!returnFound && typeof val == 'function') {
+        ctx.push(cx);
+        val = this.lv(val, ctx, partials);
+        ctx.pop();
+      }
+
+      return val;
+    },
+
+    // find values with normal names
+    f: function(key, ctx, partials, returnFound) {
+      var val = false,
+          v = null,
+          found = false;
+
+      for (var i = ctx.length - 1; i >= 0; i--) {
+        v = ctx[i];
+        if (v && typeof v == 'object' && key in v) {
+          val = v[key];
+          found = true;
+          break;
+        }
+      }
+
+      if (!found) {
+        return (returnFound) ? false : "";
+      }
+
+      if (!returnFound && typeof val == 'function') {
+        val = this.lv(val, ctx, partials);
+      }
+
+      return val;
+    },
+
+    // higher order templates
+    ho: function(val, cx, partials, text, tags) {
+      var compiler = this.c;
+      var options = this.options;
+      options.delimiters = tags;
+      var text = val.call(cx, text);
+      text = (text == null) ? String(text) : text.toString();
+      this.b(compiler.compile(text, options).render(cx, partials));
+      return false;
+    },
+
+    // template result buffering
+    b: (useArrayBuffer) ? function(s) { this.buf.push(s); } :
+                          function(s) { this.buf += s; },
+    fl: (useArrayBuffer) ? function() { var r = this.buf.join(''); this.buf = []; return r; } :
+                           function() { var r = this.buf; this.buf = ''; return r; },
+
+    // lambda replace section
+    ls: function(val, ctx, partials, inverted, start, end, tags) {
+      var cx = ctx[ctx.length - 1],
+          t = null;
+
+      if (!inverted && this.c && val.length > 0) {
+        return this.ho(val, cx, partials, this.text.substring(start, end), tags);
+      }
+
+      t = val.call(cx);
+
+      if (typeof t == 'function') {
+        if (inverted) {
+          return true;
+        } else if (this.c) {
+          return this.ho(t, cx, partials, this.text.substring(start, end), tags);
+        }
+      }
+
+      return t;
+    },
+
+    // lambda replace variable
+    lv: function(val, ctx, partials) {
+      var cx = ctx[ctx.length - 1];
+      var result = val.call(cx);
+
+      if (typeof result == 'function') {
+        result = coerceToString(result.call(cx));
+        if (this.c && ~result.indexOf("{\u007B")) {
+          return this.c.compile(result, this.options).render(cx, partials);
+        }
+      }
+
+      return coerceToString(result);
+    }
+
+  };
+
+  var rAmp = /&/g,
+      rLt = /</g,
+      rGt = />/g,
+      rApos =/\'/g,
+      rQuot = /\"/g,
+      hChars =/[&<>\"\']/;
+
+
+  function coerceToString(val) {
+    return String((val === null || val === undefined) ? '' : val);
+  }
+
+  function hoganEscape(str) {
+    str = coerceToString(str);
+    return hChars.test(str) ?
+      str
+        .replace(rAmp,'&amp;')
+        .replace(rLt,'&lt;')
+        .replace(rGt,'&gt;')
+        .replace(rApos,'&#39;')
+        .replace(rQuot, '&quot;') :
+      str;
+  }
+
+  var isArray = Array.isArray || function(a) {
+    return Object.prototype.toString.call(a) === '[object Array]';
+  };
+
+})(typeof exports !== 'undefined' ? exports : Hogan);
+
+
+
+
+
+// END WRAPPED CODE
+// ===========================================================================
+});
+define('text',{});
+define('hgn',{load: function(id){throw new Error("Dynamic load not allowed: " + id);}});
+define("hgn!search/videocell", ["hogan"], function(hogan){  var tmpl = new hogan.Template(function(c,p,i){var _=this;_.b(i=i||"");_.b("but Ial<p>");_.b(_.v(_.f("cnt",c,p,0)));_.b("</p>");return _.fl();;}, "", hogan);  function render(){ return tmpl.render.apply(tmpl, arguments); } render.template = tmpl; return render;});
+
+define('search/videocell',['require','exports','module','hgn!search/videocell'],function (require, exports, module) {
+
+  var template = require('hgn!search/videocell');
+  var _size = 250;
+  var _src = null;
+
+  var VideoCell = function() {
+    this.name = "VideoCell";
+    this.el = document.createElement('div');
+    this.el.className = 'video-cell';
+
+
+    this.video = document.createElement('video');
+    this.el.appendChild(this.video);
+    this.video.width = 250;
+    this.video.height = 250;
+    this.video.loop = true;
+    this.video.volume = 0;
+    this.video.autoplay = true;
+
+    this.index = 0;
+    this._src = null;
+    this._x = 0;
+    this._y = 0;
+    this.visible = false;
+  };
+
+  Object.defineProperties(VideoCell.prototype, {
+    x : {
+      get: function() {
+        return this._x;
+      },
+      set: function(value) {
+        this._x = value;
+        this.el.style.left = this._x + 'px';
+      }
+    },
+    y : {
+      get: function() {
+        return this._y;
+      },
+      set: function(value) {
+        this._y = value;
+        this.el.style.top = this._y + 'px';
+      }
+    }
+  });
+
+  VideoCell.prototype.init = function() {
+    //this.el.innerHTML = template({cnt: this.index});
+    this.el.id = 'vcell-'+this.index;
+    //console.log('VideoCell.init');
+    //console.log(this.el);
+  };
+
+  VideoCell.prototype.cleanUp = function() {
+    this.y = 0;
+    this.x = 0;
+    //this.video.pause();
+    //this.video.src=null;
+    //console.log('cleanup', this.index);
+    //this.video.parentNode.removeChild(this.video);
+    //this.video=null;
+  };
+
+  VideoCell.prototype.setSource = function(src) {
+    //if (src == this._src) return;
+
+    this._src = src;
+    this.video.src = this._src;
+
+  };
+
+  module.exports = VideoCell;
+
+});
+define('global/scrollbar',['require','exports','module','signals'],function (require, exports, module) {
+
+  var signals = require('signals');
+
+  var _value = 0;
+  var _minValue = 0;
+  var _maxValue = 0;
+  var _offset = 0;
+
+
+  var DKScrollBar = function() {
+    this.onUpdate = new signals.Signal();
+    this.el = document.createElement('div');
+    this.el.className = 'dk-vscrollbar';
+
+    this.track = document.createElement('div');
+    this.track.className = 'track';
+
+    this.handle = document.createElement('div');
+    this.handle.className = 'handle';
+
+    this.bindHandleDown = this.onHandleDown.bind(this);
+    this.bindHandleUp = this.onHandleUp.bind(this);
+    this.bindMouseMove = this.onMouseMove.bind(this);
+    this.el.appendChild(this.track);
+    this.el.appendChild(this.handle);
+
+
+  };
+
+  DKScrollBar.prototype.init = function() {
+    _maxValue = this.track.offsetHeight - this.handle.offsetHeight;
+    console.log('init', _maxValue);
+    this.handle.addEventListener('mousedown', this.bindHandleDown);
+    this.handle.addEventListener('mouseup', this.bindHandleUp);
+  };
+
+  DKScrollBar.prototype.destroy = function () {
+    this.handle.removeEventListener('mousedown', this.bindHandleDown);
+    this.handle.removeEventListener('mouseup', this.bindHandleUp);
+  };
+
+  DKScrollBar.prototype.onHandleDown = function(event) {
+
+    _offset = event.clientY - event.layerY;
+    window.addEventListener('mouseup', this.bindHandleUp);
+    window.addEventListener('mousemove', this.bindMouseMove);
+  };
+
+  DKScrollBar.prototype.setPosition = function(value) {
+    console.log('value:', _maxValue );
+    this.handle.style.top = value*_maxValue + 'px';
+  };
+
+  DKScrollBar.prototype.onHandleUp = function(event) {
+    window.removeEventListener('mousemove', this.bindMouseMove);
+    window.removeEventListener('mouseup', this.bindHandleUp);
+  };
+
+  DKScrollBar.prototype.onMouseMove = function(event) {
+    _maxValue = this.track.offsetHeight - this.handle.offsetHeight;
+    var handlePosition = (event.clientY  - _offset);
+    if (handlePosition<=0) handlePosition = 0;
+    if (handlePosition>=_maxValue) handlePosition = _maxValue;
+    this.handle.style.top = handlePosition + 'px';
+    _value = handlePosition/_maxValue;
+    console.log(this.handle.offsetTop);
+    this.onUpdate.dispatch(_value);
+  };
+
+  module.exports = DKScrollBar;
+
+});
+define('search/gridview',['require','exports','module','dk/util/scroller','dk/util/resizer','search/gridmodel','search/videocell','global/scrollbar'],function (require, exports, module) {
+
+  var Scroller = require('dk/util/scroller');
+  var Resizer = require('dk/util/resizer');
+  var GridModel = require('search/gridmodel');
+  var VideoCell = require('search/videocell');
+  var ScrollBar = require('global/scrollbar');
+
+  var _cellSize = 250;
+  var _isResize = false;
+  var _data = null;
+  var _visibleCells = [];
+  var _recycledCells = [];
+  var _scrollOffset = 0;
+  var _gridModel = GridModel.sharedInstance();
+
+
+  var resizer = new Resizer();
+
+  var GridView = function() {
+    this.el = document.createElement('div');
+    this.el.className = 'grid-view';
+    this._inner = document.createElement('div');
+    this.el.appendChild(this._inner);
+    this._inner.className = 'inner';
+    this._y = 0;
+
+    this.scrollbar = new ScrollBar();
+    this.el.appendChild(this.scrollbar.el);
+
+  };
+
+  Object.defineProperties(GridView.prototype, {
+      y : {
+          get: function() {
+              return this._y;
+          },
+          set: function(value) {
+              this._y = value;
+              this.el.style.top = value + 'px';
+          }
+      }
+    });
+
+  GridView.prototype.init = function() {
+    this.y = 40;
+
+    this.scroller = new Scroller(this.el);
+    resizer.init();
+
+    this.resize();
+    this.windowSize = this.el.offsetHeight;
+    this.scrollOffsetSize = -(this.contentSize - this.windowSize);
+    _columns = Math.ceil(this._inner.offsetWidth/_cellSize);
+    this.scrollbar.init();
+    resizer.init();
+    resizer.onUpdate.add(this.onResize.bind(this));
+
+    _gridModel.onDataComplete = this.onDataComplete.bind(this);
+    _gridModel.getData();
+  };
+
+  GridView.prototype.onDataComplete = function(data) {
+    _data = data;
+
+
+    this.scroller.onUpdate.add(this.onScrollUpdate.bind(this));
+
+    var rowCount = Math.floor(_data.length/_columns);
+    this._inner.style.height = (rowCount)*_cellSize + 'px';
+    this.contentSize = this._inner.offsetHeight;
+    this.scroller.updateHeight(this.contentSize);
+    this.scrollbar.onUpdate.add(this.onScrollBarUpdate.bind(this));
+    this.configure();
+  };
+
+
+  GridView.prototype.onScrollBarUpdate = function(value) {
+
+    _scrollOffset = -(this.contentSize - this.windowSize) * value;
+    console.log('value',_scrollOffset);
+    this._inner.style.top = _scrollOffset + 'px';
+    this.configure();
+  };
+
+  GridView.prototype.onResize = function(width, height) {
+    //console.log('resize');
+    this.resize();
+
+    this.windowSize = this.el.offsetHeight;
+    this.scrollOffsetSize = -(this.contentSize - this.windowSize);
+    _columns = Math.ceil(this._inner.offsetWidth/_cellSize);
+
+
+    //console.log('width', this._inner.offsetWidth, _columns);
+    _isResize = true;
+    this.configure();
+  };
+
+  GridView.prototype.pageAtIndex = function(index) {
+    var i, len = _visibleCells.length;
+    for (i=0;i<len;i++) {
+      var cell = _visibleCells[i];
+      if (cell.index==index) {
+        return cell;
+      }
+    }
+    return null;
+  };
+
+  GridView.prototype.recycleCell = function(cell) {
+    _recycledCells.push(cell);
+    if (cell.el.parentNode!==null) {
+      cell.cleanUp();
+      cell.el.parentNode.removeChild(cell.el);
+    }
+  };
+
+  GridView.prototype.dequeueResusableCell = function() {
+    if (_recycledCells.length>0) {
+      return _recycledCells.shift();
+    } else {
+      return null;
+    }
+  };
+
+  GridView.prototype.configure = function() {
+
+    var _total = _data.length;
+
+    var firstIndex = Math.abs(Math.ceil(_scrollOffset/_cellSize)) * _columns;
+    var lastIndex = firstIndex+((Math.ceil(this.windowSize/_cellSize)+1) * _columns);
+
+    var cell;
+    //Create set to be removed
+    var i, len = _visibleCells.length;
+    var _rset = [];
+    for (i=0;i<len;i++) {
+      cell = _visibleCells[i];
+      if (cell.index < firstIndex || cell.index > lastIndex) {
+        _rset.push(cell);
+        this.recycleCell(cell);
+      }
+    }
+    //Remove set after due to it needs to make sure to get through teh whole _visibleCells index without splicing.
+    var j, jlen = _rset.length;
+    var cellToDelete;
+    for (j=0;j<len;j++) {
+      cellToDelete = _rset[j];
+      for (i=0;i<len;i++) {
+        if (cellToDelete === _visibleCells[i]) {
+          _visibleCells.splice(i,1);
+        }
+      }
+    }
+
+    //Create any new ones only going through whats visible
+    var row, col;
+    for (i=firstIndex; i <= lastIndex; i++) {
+      if (this.pageAtIndex(i)===null) {
+        //Create a Cell
+        cell = this.dequeueResusableCell();
+        if (cell===null) cell = new VideoCell();
+
+        this.configureCellForIndex(cell, i);
+        _visibleCells.push(cell);
+      } else if (_isResize) {
+        //console.log('update');
+        cell = this.pageAtIndex(i);
+        this.simpleConfigureCell(cell, i);
+      }
+    }
+     _isResize = false;
+  };
+
+
+  GridView.prototype.simpleConfigureCell  = function(cell, index) {
+    cell.index = index;
+    var col = index%_columns;
+    var row = Math.floor(index/_columns);
+    var ypos = row * _cellSize;
+    var xpos = col * _cellSize;
+    cell.x = xpos;
+    cell.y = ypos;
+    cell.init();
+    cell.setSource(_data[index].video);
+  };
+
+  GridView.prototype.configureCellForIndex = function(cell, index) {
+    //console.log('configure cell', cell.el);
+    cell.index = index;
+    var col = index%_columns;
+    var row = Math.floor(index/_columns);
+    var ypos = row * _cellSize;
+    var xpos = col * _cellSize;
+    cell.x = xpos;
+    cell.y = ypos;
+    cell.setSource(_data[index].video);
+    this._inner.appendChild(cell.el);
+
+  };
+
+  GridView.prototype.onScrollUpdate = function(position) {
+    _scrollOffset = position;
+    var percentPos = Math.abs(position/(this.contentSize - this.windowSize));
+    console.log('percentPos',percentPos);
+    this.scrollbar.setPosition(percentPos);
+    if (position>0) {
+      console.log('greater then 0');
+    }
+    this._inner.style.top = position + 'px';
+    this.configure();
+
+  };
+
+  GridView.prototype.resize = function() {
+
+    var viewportWidth = sharedApp.viewport.offsetWidth;
+    var viewportHeight = sharedApp.viewport.offsetHeight;
+    console.log(viewportWidth, viewportHeight);
+    this.el.style.width = viewportWidth + 'px';
+    this.el.style.height = viewportHeight + 'px';
+    this.windowSize = this.el.style.height = (viewportHeight - 40) + 'px';
+    //this._render();
+  };
+
+  module.exports = GridView;
+});
+define('global/header',['require','exports','module'],function (require, exports, module) {
+
+  var HeaderView = function() {
+    this.el = document.createElement('header');
+    this.el.className = 'header-menu';
+  };
+
+  HeaderView.prototype.init = function() {
+
+  };
+
+  module.exports = HeaderView;
+
+});
+define('application',['require','exports','module','search/gridview','global/header'],function (require, exports, module) {
+
+  var GridView = require('search/gridview');
+  var HeaderView = require('global/header');
+
+
+  var _instance = null;
+  var _viewport;
+
+  var Application = function() {
+    if (_instance !== null) {
+      throw new Error('Can instantiate through constrsuctor. Use Application.shared()');
+    }
+    _viewport = document.querySelector('.viewport');
+  };
+
+  Object.defineProperties(Application.prototype, {
+      viewport : {
+        get: function() {
+          return _viewport;
+        }
+      }
+  });
+
+  Application.shared = function() {
+    if (_instance === null) {
+      _instance = new Application();
+    }
+    return _instance;
+  };
+
+  Application.prototype.initialize = function() {
+    console.log('Application.init');
+    var headerView = new HeaderView();
+    _viewport.appendChild(headerView.el);
+    headerView.init();
+
+
+
+    var gridView = new GridView();
+    _viewport.appendChild(gridView.el);
+    console.log('added view');
+    gridView.init();
+
+
+  };
+
+  return Application;
+});
+require.config({
+  urlArgs: "bust=" +  (new Date()).getTime(),
+  paths: {
+    'hogan' : 'vendor/hogan',
+    'text' : 'vendor/text',
+    'hgn' : 'vendor/hgn',
+    'signals' : 'vendor/signals'
+  },
+  packages: [],
+	shim: {}
+});
+
+//A Comment
+var sharedApp = sharedApp || {};
+
+define('main',['require','exports','module','application'],function (require, exports, module) {
+  var Application = require('application');
+  sharedApp = Application.shared();
+
+  console.log(sharedApp);
+
+  sharedApp.initialize();
+
+});
+
+require(["main"]);
